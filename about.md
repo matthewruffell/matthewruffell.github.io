@@ -14,7 +14,7 @@ I have been using computers for as long as I can remember, and I have a strong i
 This is my personal blog where I write about things that interest me. I hope it interests you too. 
 
 ## Contact Me
-You can email me at [matthew@ruffell.nz](mailto:matthew@ruffell.nz) and, if you need it, here is [PGP public key](/assets/documents/matthew_ruffell.asc) with fingerprint **AAA AAA AAA AAA AAA**.
+You can email me at [matthew@ruffell.nz](mailto:matthew@ruffell.nz) and, if you need it, here is [PGP public key](/assets/documents/matthew_ruffell.asc) with fingerprint **1CBA CD79 D8CF F1A3 D005 1C9A DC48 9D9A 68C5 DFF5**.
 
 ## CV / Resume
 If you are interested in my achievements, then have a look at my [CV](/assets/documents/matthew_ruffell.pdf).
