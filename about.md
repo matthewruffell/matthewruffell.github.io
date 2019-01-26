@@ -25,10 +25,10 @@ I am vegetarian since mid 2017, and I am currently striving to go vegan in the n
 Maybe you should also consider your diet, and if you need to slaughter animals just to eat a snack.
 
 This is a pretty good video and raises some excellent arguments, while being entertaining to watch:
-<iframe width="560" height="315" src="https://www.youtube-nocookie.com/embed/NxvQPzrg2Wg" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+<iframe width="759" height="427" src="https://www.youtube-nocookie.com/embed/NxvQPzrg2Wg" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
 
 ## Being Green
 While I do live in New Zealand, which is more or less "clean and green", I am well aware that humans are polluting the world at an alarming rate, especially with easy access to plastic and its friends. We all need to lower our consumption and attempt to go "zero waste". This is pretty important for humans to survive.
 
 This video is also excellent, and is well worth a watch:
-<iframe width="560" height="315" src="https://www.youtube-nocookie.com/embed/RS7IzU2VJIQ" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+<iframe width="759" height="427" src="https://www.youtube-nocookie.com/embed/RS7IzU2VJIQ" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
