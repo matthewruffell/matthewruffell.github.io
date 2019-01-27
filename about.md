@@ -5,7 +5,7 @@ sidebar_link: true
 ---
 
 # Matthew Ruffell
-<img src="/assets/images/matthew.jpg" width="200px" style="text-align:center">
+<img src="/assets/images/2018_matthew.jpg" width="200px" style="text-align:center">
 
 Also known as CaptianYipe in some circles. Yes, it is a reference from the old [Quest of Yipe!](http://www.yipesoftware.com/yipeii.htm) games on Macintosh.
 
