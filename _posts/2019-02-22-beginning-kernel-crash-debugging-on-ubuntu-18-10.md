@@ -190,7 +190,7 @@ The `log` command brings up the contents of `dmesg`, for that particular session
 
 ![log](/assets/images/2019_116.png)
 
-The most interesting part is bottom, where Oops message is printed to the log:
+The most interesting part is the bottom, where Oops message is printed to the log:
 
 ![bottom](/assets/images/2019_117.png)
 
