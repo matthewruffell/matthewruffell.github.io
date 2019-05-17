@@ -13,7 +13,7 @@ Reverse Engineering and Malware Analysis is one hard field to get in to. Some Un
 
 I own a copy of all of these books, and recommend them:
 
-![Books](/assets/images/00.jpg)
+![Books](/assets/images/2018_00.jpg)
 
 * [Practical Malware Analysis](https://www.bookdepository.com/Practical-Malware-Analysis-Michael-Sikorski/9781593272906)
 * [Reversing : Secrets of Reverse Engineering](https://www.bookdepository.com/Reversing-Eldad-Eilam/9780764574818)
