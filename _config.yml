@@ -5,7 +5,7 @@ highlighter:      rouge
 # Setup
 title:            Matthew Ruffell
 tagline:          'Security Researcher'
-description:      'Reverse Engineer. Penetration Tester.<br>Kernel Developer. Entrepreneur.<br>Founder of <a href="https://dapperlinux.com">Dapper Linux</a>.'
+description:      'Sustaining Engineer @ <a href="https://canonical.com">Canonical</a>.<br>Kernel Developer. Reverse Engineer.<br>Founder of <a href="https://dapperlinux.com">Dapper Linux</a>.'
 url:              https://ruffell.nz
 #baseurl:          ''
                   # the optional subpath of your site, e.g. "/blog"
