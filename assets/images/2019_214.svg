@@ -1,0 +1,909 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1200" height="278" onload="init(evt)" viewBox="0 0 1200 278" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs>
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#e0e0ff" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	text { font-family:Verdana; font-size:12px; fill:rgb(0,0,0); }
+	#search { opacity:0.1; cursor:pointer; }
+	#search:hover, #search.show { opacity:1; }
+	#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+	#title { text-anchor:middle; font-size:17px}
+	#unzoom { cursor:pointer; }
+	#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.hide { display:none; }
+	.parent { opacity:0.5; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	"use strict";
+	var details, searchbtn, unzoombtn, matchedtxt, svg, searching;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		unzoombtn = document.getElementById("unzoom");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+	}
+
+	window.addEventListener("click", function(e) {
+		var target = find_group(e.target);
+		if (target) {
+			if (target.nodeName == "a") {
+				if (e.ctrlKey === false) return;
+				e.preventDefault();
+			}
+			if (target.classList.contains("parent")) unzoom();
+			zoom(target);
+		}
+		else if (e.target.id == "unzoom") unzoom();
+		else if (e.target.id == "search") search_prompt();
+	}, false)
+
+	// mouse-over for info
+	// show
+	window.addEventListener("mouseover", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = "Function: " + g_to_text(target);
+	}, false)
+
+	// clear
+	window.addEventListener("mouseout", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = ' ';
+	}, false)
+
+	// ctrl-F for search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+	}, false)
+
+	// functions
+	function find_child(node, selector) {
+		var children = node.querySelectorAll(selector);
+		if (children.length) return children[0];
+		return;
+	}
+	function find_group(node) {
+		var parent = node.parentElement;
+		if (!parent) return;
+		if (parent.id == "frames") return node;
+		return find_group(parent);
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_" + attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_" + attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes.width.value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes.x.value = parseFloat(r.attributes.x.value) + 3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2 * 12 * 0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		// Fit in full text width
+		if (/^ *$/.test(txt) || t.getSubStringLength(0, txt.length) < w)
+			return;
+
+		for (var x = txt.length - 2; x > 0; x--) {
+			if (t.getSubStringLength(0, x + 2) <= w) {
+				t.textContent = txt.substring(0, x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = (parseFloat(e.attributes.x.value) - x - 10) * ratio + 10;
+				if (e.tagName == "text")
+					e.attributes.x.value = find_child(e.parentNode, "rect[x]").attributes.x.value + 3;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseFloat(e.attributes.width.value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_child(c[i], x - 10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = 10;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseInt(svg.width.baseVal.value) - (10 * 2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr.width.value);
+		var xmin = parseFloat(attr.x.value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr.y.value);
+		var ratio = (svg.width.baseVal.value - 2 * 10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		unzoombtn.classList.remove("hide");
+
+		var el = document.getElementById("frames").children;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a.x.value);
+			var ew = parseFloat(a.width.value);
+			var upstack;
+			// Is it an ancestor
+			if (0 == 0) {
+				upstack = parseFloat(a.y.value) > ymin;
+			} else {
+				upstack = parseFloat(a.y.value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.classList.add("parent");
+					zoom_parent(e);
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.classList.add("hide");
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.classList.add("hide");
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					update_text(e);
+				}
+			}
+		}
+	}
+	function unzoom() {
+		unzoombtn.classList.add("hide");
+		var el = document.getElementById("frames").children;
+		for(var i = 0; i < el.length; i++) {
+			el[i].classList.remove("parent");
+			el[i].classList.remove("hide");
+			zoom_reset(el[i]);
+			update_text(el[i]);
+		}
+	}
+
+	// search
+	function reset_search() {
+		var el = document.querySelectorAll("#frames rect");
+		for (var i = 0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)", "");
+			if (term != null) {
+				search(term)
+			}
+		} else {
+			reset_search();
+			searching = 0;
+			searchbtn.classList.remove("show");
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.classList.add("hide");
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		var re = new RegExp(term);
+		var el = document.getElementById("frames").children;
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes.width.value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes.x.value);
+				orig_save(rect, "fill");
+				rect.attributes.fill.value = "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+
+		searchbtn.classList.add("show");
+		searchbtn.firstChild.nodeValue = "Reset Search";
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.classList.remove("hide");
+		var pct = 100 * count / maxwidth;
+		if (pct != 100) pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1200.0" height="278.0" fill="url(#background)"  />
+<text id="title" x="600.00" y="24" >Off-CPU Time Flame Graph</text>
+<text id="details" x="10.00" y="261" > </text>
+<text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
+<text id="search" x="1090.00" y="24" >Search</text>
+<text id="matched" x="1090.00" y="261" > </text>
+<g id="frames">
+<g >
+<title>smpboot_thread_fn (38,094 ms, 6.14%)</title><rect x="629.2" y="165" width="72.4" height="15.0" fill="rgb(130,130,204)" rx="2" ry="2" />
+<text  x="632.16" y="175.5" >smpboot_..</text>
+</g>
+<g >
+<title>ret_from_fork (40,025 ms, 6.45%)</title><rect x="701.6" y="197" width="76.2" height="15.0" fill="rgb(84,84,236)" rx="2" ry="2" />
+<text  x="704.64" y="207.5" >ret_from..</text>
+</g>
+<g >
+<title>poll_schedule_timeout (195 ms, 0.03%)</title><rect x="1117.2" y="133" width="0.3" height="15.0" fill="rgb(81,81,237)" rx="2" ry="2" />
+<text  x="1120.17" y="143.5" ></text>
+</g>
+<g >
+<title>kworker/0:2 (40,984 ms, 6.61%)</title><rect x="777.8" y="213" width="78.0" height="15.0" fill="rgb(96,96,223)" rx="2" ry="2" />
+<text  x="780.79" y="223.5" >kworker/0:2</text>
+</g>
+<g >
+<title>schedule_timeout (39,996 ms, 6.45%)</title><rect x="553.1" y="149" width="76.1" height="15.0" fill="rgb(99,99,216)" rx="2" ry="2" />
+<text  x="556.07" y="159.5" >schedule..</text>
+</g>
+<g >
+<title>kworker/u4:2 (33,976 ms, 5.48%)</title><rect x="1052.5" y="213" width="64.7" height="15.0" fill="rgb(110,110,205)" rx="2" ry="2" />
+<text  x="1055.53" y="223.5" >kworker..</text>
+</g>
+<g >
+<title>kworker/u4:0 (40,663 ms, 6.56%)</title><rect x="975.2" y="213" width="77.3" height="15.0" fill="rgb(129,129,220)" rx="2" ry="2" />
+<text  x="978.17" y="223.5" >kworker/..</text>
+</g>
+<g >
+<title>__schedule (40,025 ms, 6.45%)</title><rect x="701.6" y="133" width="76.2" height="15.0" fill="rgb(124,124,202)" rx="2" ry="2" />
+<text  x="704.64" y="143.5" >__schedule</text>
+</g>
+<g >
+<title>schedule (38,094 ms, 6.14%)</title><rect x="629.2" y="149" width="72.4" height="15.0" fill="rgb(91,91,214)" rx="2" ry="2" />
+<text  x="632.16" y="159.5" >schedule</text>
+</g>
+<g >
+<title>do_nanosleep (29,997 ms, 4.84%)</title><rect x="278.2" y="133" width="57.1" height="15.0" fill="rgb(84,84,190)" rx="2" ry="2" />
+<text  x="281.20" y="143.5" >do_nan..</text>
+</g>
+<g >
+<title>__schedule (39,990 ms, 6.45%)</title><rect x="202.1" y="69" width="76.1" height="15.0" fill="rgb(128,128,241)" rx="2" ry="2" />
+<text  x="205.12" y="79.5" >__schedule</text>
+</g>
+<g >
+<title>ret_from_fork (40,663 ms, 6.56%)</title><rect x="975.2" y="197" width="77.3" height="15.0" fill="rgb(136,136,191)" rx="2" ry="2" />
+<text  x="978.17" y="207.5" >ret_from..</text>
+</g>
+<g >
+<title>ctl_ioctl (29,997 ms, 4.84%)</title><rect x="10.0" y="117" width="57.1" height="15.0" fill="rgb(121,121,227)" rx="2" ry="2" />
+<text  x="13.00" y="127.5" >ctl_io..</text>
+</g>
+<g >
+<title>kthread (38,082 ms, 6.14%)</title><rect x="1117.5" y="181" width="72.5" height="15.0" fill="rgb(119,119,216)" rx="2" ry="2" />
+<text  x="1120.54" y="191.5" >kthread</text>
+</g>
+<g >
+<title>ret_from_fork (20,273 ms, 3.27%)</title><rect x="936.6" y="197" width="38.6" height="15.0" fill="rgb(135,135,207)" rx="2" ry="2" />
+<text  x="939.60" y="207.5" >ret..</text>
+</g>
+<g >
+<title>poll (39,990 ms, 6.45%)</title><rect x="202.1" y="197" width="76.1" height="15.0" fill="rgb(91,91,205)" rx="2" ry="2" />
+<text  x="205.12" y="207.5" >poll</text>
+</g>
+<g >
+<title>schedule_hrtimeout_range_clock (41,000 ms, 6.61%)</title><rect x="67.1" y="69" width="78.0" height="15.0" fill="rgb(86,86,204)" rx="2" ry="2" />
+<text  x="70.07" y="79.5" >schedule_..</text>
+</g>
+<g >
+<title>perf (195 ms, 0.03%)</title><rect x="1117.2" y="213" width="0.3" height="15.0" fill="rgb(116,116,229)" rx="2" ry="2" />
+<text  x="1120.17" y="223.5" ></text>
+</g>
+<g >
+<title>__nanosleep (41,964 ms, 6.77%)</title><rect x="335.3" y="181" width="79.8" height="15.0" fill="rgb(90,90,190)" rx="2" ry="2" />
+<text  x="338.28" y="191.5" >__nanosleep</text>
+</g>
+<g >
+<title>schedule_hrtimeout_range (39,990 ms, 6.45%)</title><rect x="202.1" y="117" width="76.1" height="15.0" fill="rgb(104,104,205)" rx="2" ry="2" />
+<text  x="205.12" y="127.5" >schedule..</text>
+</g>
+<g >
+<title>kthread (38,094 ms, 6.14%)</title><rect x="629.2" y="181" width="72.4" height="15.0" fill="rgb(83,83,244)" rx="2" ry="2" />
+<text  x="632.16" y="191.5" >kthread</text>
+</g>
+<g >
+<title>worker_thread (40,984 ms, 6.61%)</title><rect x="777.8" y="165" width="78.0" height="15.0" fill="rgb(98,98,197)" rx="2" ry="2" />
+<text  x="780.79" y="175.5" >worker_th..</text>
+</g>
+<g >
+<title>iscsid (84,464 ms, 13.62%)</title><rect x="335.3" y="213" width="160.7" height="15.0" fill="rgb(118,118,225)" rx="2" ry="2" />
+<text  x="338.28" y="223.5" >iscsid</text>
+</g>
+<g >
+<title>dm_ctl_ioctl (29,997 ms, 4.84%)</title><rect x="10.0" y="133" width="57.1" height="15.0" fill="rgb(135,135,204)" rx="2" ry="2" />
+<text  x="13.00" y="143.5" >dm_ctl..</text>
+</g>
+<g >
+<title>poll (195 ms, 0.03%)</title><rect x="1117.2" y="197" width="0.3" height="15.0" fill="rgb(106,106,237)" rx="2" ry="2" />
+<text  x="1120.17" y="207.5" ></text>
+</g>
+<g >
+<title>gmain (39,990 ms, 6.45%)</title><rect x="202.1" y="213" width="76.1" height="15.0" fill="rgb(111,111,237)" rx="2" ry="2" />
+<text  x="205.12" y="223.5" >gmain</text>
+</g>
+<g >
+<title>do_futex (29,982 ms, 4.83%)</title><rect x="145.1" y="149" width="57.0" height="15.0" fill="rgb(102,102,244)" rx="2" ry="2" />
+<text  x="148.08" y="159.5" >do_futex</text>
+</g>
+<g >
+<title>worker_thread (20,273 ms, 3.27%)</title><rect x="936.6" y="165" width="38.6" height="15.0" fill="rgb(105,105,232)" rx="2" ry="2" />
+<text  x="939.60" y="175.5" >wor..</text>
+</g>
+<g >
+<title>dev_wait (29,997 ms, 4.84%)</title><rect x="10.0" y="101" width="57.1" height="15.0" fill="rgb(81,81,241)" rx="2" ry="2" />
+<text  x="13.00" y="111.5" >dev_wait</text>
+</g>
+<g >
+<title>kthread (39,996 ms, 6.45%)</title><rect x="553.1" y="181" width="76.1" height="15.0" fill="rgb(88,88,227)" rx="2" ry="2" />
+<text  x="556.07" y="191.5" >kthread</text>
+</g>
+<g >
+<title>sys_poll (42,500 ms, 6.85%)</title><rect x="415.1" y="149" width="80.9" height="15.0" fill="rgb(136,136,218)" rx="2" ry="2" />
+<text  x="418.12" y="159.5" >sys_poll</text>
+</g>
+<g >
+<title>schedule (29,982 ms, 4.83%)</title><rect x="145.1" y="101" width="57.0" height="15.0" fill="rgb(108,108,206)" rx="2" ry="2" />
+<text  x="148.08" y="111.5" >schedule</text>
+</g>
+<g >
+<title>schedule (75 ms, 0.01%)</title><rect x="1189.9" y="133" width="0.1" height="15.0" fill="rgb(94,94,199)" rx="2" ry="2" />
+<text  x="1192.86" y="143.5" ></text>
+</g>
+<g >
+<title>pthread_cond_timedwait@@GLIBC_2.3.2 (29,982 ms, 4.83%)</title><rect x="145.1" y="197" width="57.0" height="15.0" fill="rgb(136,136,205)" rx="2" ry="2" />
+<text  x="148.08" y="207.5" >pthrea..</text>
+</g>
+<g >
+<title>ksoftirqd/1 (38,094 ms, 6.14%)</title><rect x="629.2" y="213" width="72.4" height="15.0" fill="rgb(117,117,203)" rx="2" ry="2" />
+<text  x="632.16" y="223.5" >ksoftirq..</text>
+</g>
+<g >
+<title>poll_schedule_timeout (42,500 ms, 6.85%)</title><rect x="415.1" y="117" width="80.9" height="15.0" fill="rgb(93,93,203)" rx="2" ry="2" />
+<text  x="418.12" y="127.5" >poll_sche..</text>
+</g>
+<g >
+<title>irqbalance (29,997 ms, 4.84%)</title><rect x="278.2" y="213" width="57.1" height="15.0" fill="rgb(110,110,193)" rx="2" ry="2" />
+<text  x="281.20" y="223.5" >irqbal..</text>
+</g>
+<g >
+<title>entry_SYSCALL_64_fastpath (29,997 ms, 4.84%)</title><rect x="10.0" y="181" width="57.1" height="15.0" fill="rgb(100,100,243)" rx="2" ry="2" />
+<text  x="13.00" y="191.5" >entry_..</text>
+</g>
+<g >
+<title>kworker/0:1H (40,025 ms, 6.45%)</title><rect x="701.6" y="213" width="76.2" height="15.0" fill="rgb(86,86,243)" rx="2" ry="2" />
+<text  x="704.64" y="223.5" >kworker/..</text>
+</g>
+<g >
+<title>ret_from_fork (39,996 ms, 6.45%)</title><rect x="553.1" y="197" width="76.1" height="15.0" fill="rgb(136,136,212)" rx="2" ry="2" />
+<text  x="556.07" y="207.5" >ret_from..</text>
+</g>
+<g >
+<title>__schedule (29,997 ms, 4.84%)</title><rect x="278.2" y="101" width="57.1" height="15.0" fill="rgb(92,92,244)" rx="2" ry="2" />
+<text  x="281.20" y="111.5" >__sche..</text>
+</g>
+<g >
+<title>__schedule (41,000 ms, 6.61%)</title><rect x="67.1" y="37" width="78.0" height="15.0" fill="rgb(116,116,224)" rx="2" ry="2" />
+<text  x="70.07" y="47.5" >__schedule</text>
+</g>
+<g >
+<title>entry_SYSCALL_64_fastpath (195 ms, 0.03%)</title><rect x="1117.2" y="181" width="0.3" height="15.0" fill="rgb(128,128,208)" rx="2" ry="2" />
+<text  x="1120.17" y="191.5" ></text>
+</g>
+<g >
+<title>schedule (20,273 ms, 3.27%)</title><rect x="936.6" y="149" width="38.6" height="15.0" fill="rgb(115,115,226)" rx="2" ry="2" />
+<text  x="939.60" y="159.5" >sch..</text>
+</g>
+<g >
+<title>dmeventd (100,979 ms, 16.28%)</title><rect x="10.0" y="213" width="192.1" height="15.0" fill="rgb(100,100,243)" rx="2" ry="2" />
+<text  x="13.00" y="223.5" >dmeventd</text>
+</g>
+<g >
+<title>__schedule (42,500 ms, 6.85%)</title><rect x="415.1" y="53" width="80.9" height="15.0" fill="rgb(96,96,206)" rx="2" ry="2" />
+<text  x="418.12" y="63.5" >__schedule</text>
+</g>
+<g >
+<title>__schedule (38,004 ms, 6.13%)</title><rect x="1117.5" y="133" width="72.4" height="15.0" fill="rgb(118,118,234)" rx="2" ry="2" />
+<text  x="1120.55" y="143.5" >__schedule</text>
+</g>
+<g >
+<title>worker_thread (40,025 ms, 6.45%)</title><rect x="701.6" y="165" width="76.2" height="15.0" fill="rgb(88,88,221)" rx="2" ry="2" />
+<text  x="704.64" y="175.5" >worker_t..</text>
+</g>
+<g >
+<title>ret_from_fork (40,984 ms, 6.61%)</title><rect x="777.8" y="197" width="78.0" height="15.0" fill="rgb(83,83,233)" rx="2" ry="2" />
+<text  x="780.79" y="207.5" >ret_from_..</text>
+</g>
+<g >
+<title>khugepaged (39,996 ms, 6.45%)</title><rect x="553.1" y="165" width="76.1" height="15.0" fill="rgb(85,85,217)" rx="2" ry="2" />
+<text  x="556.07" y="175.5" >khugepaged</text>
+</g>
+<g >
+<title>__schedule (40,984 ms, 6.61%)</title><rect x="777.8" y="133" width="78.0" height="15.0" fill="rgb(92,92,230)" rx="2" ry="2" />
+<text  x="780.79" y="143.5" >__schedule</text>
+</g>
+<g >
+<title>poll (42,500 ms, 6.85%)</title><rect x="415.1" y="181" width="80.9" height="15.0" fill="rgb(106,106,207)" rx="2" ry="2" />
+<text  x="418.12" y="191.5" >poll</text>
+</g>
+<g >
+<title>kthread (40,984 ms, 6.61%)</title><rect x="777.8" y="181" width="78.0" height="15.0" fill="rgb(107,107,220)" rx="2" ry="2" />
+<text  x="780.79" y="191.5" >kthread</text>
+</g>
+<g >
+<title>entry_SYSCALL_64_fastpath (39,990 ms, 6.45%)</title><rect x="202.1" y="181" width="76.1" height="15.0" fill="rgb(82,82,211)" rx="2" ry="2" />
+<text  x="205.12" y="191.5" >entry_SY..</text>
+</g>
+<g >
+<title>__schedule (20,273 ms, 3.27%)</title><rect x="936.6" y="133" width="38.6" height="15.0" fill="rgb(89,89,194)" rx="2" ry="2" />
+<text  x="939.60" y="143.5" >__s..</text>
+</g>
+<g >
+<title>__schedule (33,976 ms, 5.48%)</title><rect x="1052.5" y="133" width="64.7" height="15.0" fill="rgb(125,125,215)" rx="2" ry="2" />
+<text  x="1055.53" y="143.5" >__sched..</text>
+</g>
+<g >
+<title>schedule (195 ms, 0.03%)</title><rect x="1117.2" y="85" width="0.3" height="15.0" fill="rgb(101,101,237)" rx="2" ry="2" />
+<text  x="1120.17" y="95.5" ></text>
+</g>
+<g >
+<title>schedule (39,996 ms, 6.45%)</title><rect x="553.1" y="133" width="76.1" height="15.0" fill="rgb(107,107,236)" rx="2" ry="2" />
+<text  x="556.07" y="143.5" >schedule</text>
+</g>
+<g >
+<title>schedule_hrtimeout_range_clock (42,500 ms, 6.85%)</title><rect x="415.1" y="85" width="80.9" height="15.0" fill="rgb(108,108,227)" rx="2" ry="2" />
+<text  x="418.12" y="95.5" >schedule_..</text>
+</g>
+<g >
+<title>all (620,210 ms, 100%)</title><rect x="10.0" y="229" width="1180.0" height="15.0" fill="rgb(82,82,231)" rx="2" ry="2" />
+<text  x="13.00" y="239.5" ></text>
+</g>
+<g >
+<title>schedule_hrtimeout_range_clock (195 ms, 0.03%)</title><rect x="1117.2" y="101" width="0.3" height="15.0" fill="rgb(85,85,230)" rx="2" ry="2" />
+<text  x="1120.17" y="111.5" ></text>
+</g>
+<g >
+<title>__schedule (41,964 ms, 6.77%)</title><rect x="335.3" y="85" width="79.8" height="15.0" fill="rgb(100,100,199)" rx="2" ry="2" />
+<text  x="338.28" y="95.5" >__schedule</text>
+</g>
+<g >
+<title>schedule (29,997 ms, 4.84%)</title><rect x="10.0" y="69" width="57.1" height="15.0" fill="rgb(131,131,219)" rx="2" ry="2" />
+<text  x="13.00" y="79.5" >schedule</text>
+</g>
+<g >
+<title>schedule_hrtimeout_range (195 ms, 0.03%)</title><rect x="1117.2" y="117" width="0.3" height="15.0" fill="rgb(126,126,201)" rx="2" ry="2" />
+<text  x="1120.17" y="127.5" ></text>
+</g>
+<g >
+<title>entry_SYSCALL_64_fastpath (42,500 ms, 6.85%)</title><rect x="415.1" y="165" width="80.9" height="15.0" fill="rgb(109,109,200)" rx="2" ry="2" />
+<text  x="418.12" y="175.5" >entry_SYS..</text>
+</g>
+<g >
+<title>schedule (41,000 ms, 6.61%)</title><rect x="67.1" y="53" width="78.0" height="15.0" fill="rgb(97,97,197)" rx="2" ry="2" />
+<text  x="70.07" y="63.5" >schedule</text>
+</g>
+<g >
+<title>jbd2/nvme0n1p1- (30,007 ms, 4.84%)</title><rect x="496.0" y="213" width="57.1" height="15.0" fill="rgb(104,104,197)" rx="2" ry="2" />
+<text  x="498.98" y="223.5" >jbd2/n..</text>
+</g>
+<g >
+<title>ret_from_fork (33,976 ms, 5.48%)</title><rect x="1052.5" y="197" width="64.7" height="15.0" fill="rgb(124,124,215)" rx="2" ry="2" />
+<text  x="1055.53" y="207.5" >ret_fro..</text>
+</g>
+<g >
+<title>__schedule (40,663 ms, 6.56%)</title><rect x="975.2" y="133" width="77.3" height="15.0" fill="rgb(81,81,238)" rx="2" ry="2" />
+<text  x="978.17" y="143.5" >__schedule</text>
+</g>
+<g >
+<title>__schedule (30,007 ms, 4.84%)</title><rect x="496.0" y="133" width="57.1" height="15.0" fill="rgb(103,103,234)" rx="2" ry="2" />
+<text  x="498.98" y="143.5" >__sche..</text>
+</g>
+<g >
+<title>sys_poll (39,990 ms, 6.45%)</title><rect x="202.1" y="165" width="76.1" height="15.0" fill="rgb(96,96,222)" rx="2" ry="2" />
+<text  x="205.12" y="175.5" >sys_poll</text>
+</g>
+<g >
+<title>schedule (38,004 ms, 6.13%)</title><rect x="1117.5" y="149" width="72.4" height="15.0" fill="rgb(99,99,225)" rx="2" ry="2" />
+<text  x="1120.55" y="159.5" >schedule</text>
+</g>
+<g >
+<title>[unknown] (84,464 ms, 13.62%)</title><rect x="335.3" y="197" width="160.7" height="15.0" fill="rgb(138,138,215)" rx="2" ry="2" />
+<text  x="338.28" y="207.5" >[unknown]</text>
+</g>
+<g >
+<title>kworker/1:0 (42,484 ms, 6.85%)</title><rect x="855.8" y="213" width="80.8" height="15.0" fill="rgb(114,114,235)" rx="2" ry="2" />
+<text  x="858.77" y="223.5" >kworker/1:0</text>
+</g>
+<g >
+<title>__schedule (39,996 ms, 6.45%)</title><rect x="553.1" y="117" width="76.1" height="15.0" fill="rgb(85,85,238)" rx="2" ry="2" />
+<text  x="556.07" y="127.5" >__schedule</text>
+</g>
+<g >
+<title>__schedule (29,982 ms, 4.83%)</title><rect x="145.1" y="85" width="57.0" height="15.0" fill="rgb(128,128,219)" rx="2" ry="2" />
+<text  x="148.08" y="95.5" >__sche..</text>
+</g>
+<g >
+<title>futex_wait (29,982 ms, 4.83%)</title><rect x="145.1" y="133" width="57.0" height="15.0" fill="rgb(119,119,240)" rx="2" ry="2" />
+<text  x="148.08" y="143.5" >futex_..</text>
+</g>
+<g >
+<title>ret_from_fork (42,484 ms, 6.85%)</title><rect x="855.8" y="197" width="80.8" height="15.0" fill="rgb(131,131,218)" rx="2" ry="2" />
+<text  x="858.77" y="207.5" >ret_from_..</text>
+</g>
+<g >
+<title>kthread (33,976 ms, 5.48%)</title><rect x="1052.5" y="181" width="64.7" height="15.0" fill="rgb(125,125,190)" rx="2" ry="2" />
+<text  x="1055.53" y="191.5" >kthread</text>
+</g>
+<g >
+<title>schedule_hrtimeout_range (41,000 ms, 6.61%)</title><rect x="67.1" y="85" width="78.0" height="15.0" fill="rgb(115,115,208)" rx="2" ry="2" />
+<text  x="70.07" y="95.5" >schedule_..</text>
+</g>
+<g >
+<title>do_sys_poll (42,500 ms, 6.85%)</title><rect x="415.1" y="133" width="80.9" height="15.0" fill="rgb(84,84,240)" rx="2" ry="2" />
+<text  x="418.12" y="143.5" >do_sys_poll</text>
+</g>
+<g >
+<title>schedule_hrtimeout_range_clock (39,990 ms, 6.45%)</title><rect x="202.1" y="101" width="76.1" height="15.0" fill="rgb(98,98,227)" rx="2" ry="2" />
+<text  x="205.12" y="111.5" >schedule..</text>
+</g>
+<g >
+<title>ioctl (29,997 ms, 4.84%)</title><rect x="10.0" y="197" width="57.1" height="15.0" fill="rgb(85,85,195)" rx="2" ry="2" />
+<text  x="13.00" y="207.5" >ioctl</text>
+</g>
+<g >
+<title>rcu_gp_kthread (38,082 ms, 6.14%)</title><rect x="1117.5" y="165" width="72.5" height="15.0" fill="rgb(127,127,243)" rx="2" ry="2" />
+<text  x="1120.54" y="175.5" >rcu_gp_k..</text>
+</g>
+<g >
+<title>hrtimer_nanosleep (29,997 ms, 4.84%)</title><rect x="278.2" y="149" width="57.1" height="15.0" fill="rgb(103,103,223)" rx="2" ry="2" />
+<text  x="281.20" y="159.5" >hrtime..</text>
+</g>
+<g >
+<title>sys_nanosleep (41,964 ms, 6.77%)</title><rect x="335.3" y="149" width="79.8" height="15.0" fill="rgb(100,100,193)" rx="2" ry="2" />
+<text  x="338.28" y="159.5" >sys_nanos..</text>
+</g>
+<g >
+<title>do_vfs_ioctl (29,997 ms, 4.84%)</title><rect x="10.0" y="149" width="57.1" height="15.0" fill="rgb(117,117,235)" rx="2" ry="2" />
+<text  x="13.00" y="159.5" >do_vfs..</text>
+</g>
+<g >
+<title>worker_thread (40,663 ms, 6.56%)</title><rect x="975.2" y="165" width="77.3" height="15.0" fill="rgb(139,139,228)" rx="2" ry="2" />
+<text  x="978.17" y="175.5" >worker_t..</text>
+</g>
+<g >
+<title>main (41,000 ms, 6.61%)</title><rect x="67.1" y="197" width="78.0" height="15.0" fill="rgb(112,112,202)" rx="2" ry="2" />
+<text  x="70.07" y="207.5" >main</text>
+</g>
+<g >
+<title>sys_select (41,000 ms, 6.61%)</title><rect x="67.1" y="149" width="78.0" height="15.0" fill="rgb(107,107,217)" rx="2" ry="2" />
+<text  x="70.07" y="159.5" >sys_select</text>
+</g>
+<g >
+<title>schedule (29,997 ms, 4.84%)</title><rect x="278.2" y="117" width="57.1" height="15.0" fill="rgb(108,108,235)" rx="2" ry="2" />
+<text  x="281.20" y="127.5" >schedule</text>
+</g>
+<g >
+<title>kthread (40,663 ms, 6.56%)</title><rect x="975.2" y="181" width="77.3" height="15.0" fill="rgb(130,130,209)" rx="2" ry="2" />
+<text  x="978.17" y="191.5" >kthread</text>
+</g>
+<g >
+<title>__schedule (42,484 ms, 6.85%)</title><rect x="855.8" y="133" width="80.8" height="15.0" fill="rgb(115,115,206)" rx="2" ry="2" />
+<text  x="858.77" y="143.5" >__schedule</text>
+</g>
+<g >
+<title>sys_futex (29,982 ms, 4.83%)</title><rect x="145.1" y="165" width="57.0" height="15.0" fill="rgb(117,117,203)" rx="2" ry="2" />
+<text  x="148.08" y="175.5" >sys_fu..</text>
+</g>
+<g >
+<title>rcu_sched (38,082 ms, 6.14%)</title><rect x="1117.5" y="213" width="72.5" height="15.0" fill="rgb(89,89,198)" rx="2" ry="2" />
+<text  x="1120.54" y="223.5" >rcu_sched</text>
+</g>
+<g >
+<title>entry_SYSCALL_64_fastpath (41,964 ms, 6.77%)</title><rect x="335.3" y="165" width="79.8" height="15.0" fill="rgb(126,126,208)" rx="2" ry="2" />
+<text  x="338.28" y="175.5" >entry_SYS..</text>
+</g>
+<g >
+<title>ret_from_fork (30,007 ms, 4.84%)</title><rect x="496.0" y="197" width="57.1" height="15.0" fill="rgb(122,122,243)" rx="2" ry="2" />
+<text  x="498.98" y="207.5" >ret_fr..</text>
+</g>
+<g >
+<title>__schedule (29,997 ms, 4.84%)</title><rect x="10.0" y="53" width="57.1" height="15.0" fill="rgb(130,130,234)" rx="2" ry="2" />
+<text  x="13.00" y="63.5" >__sche..</text>
+</g>
+<g >
+<title>poll_schedule_timeout (39,990 ms, 6.45%)</title><rect x="202.1" y="133" width="76.1" height="15.0" fill="rgb(93,93,229)" rx="2" ry="2" />
+<text  x="205.12" y="143.5" >poll_sch..</text>
+</g>
+<g >
+<title>sys_ioctl (29,997 ms, 4.84%)</title><rect x="10.0" y="165" width="57.1" height="15.0" fill="rgb(114,114,235)" rx="2" ry="2" />
+<text  x="13.00" y="175.5" >sys_io..</text>
+</g>
+<g >
+<title>khugepaged (39,996 ms, 6.45%)</title><rect x="553.1" y="213" width="76.1" height="15.0" fill="rgb(85,85,201)" rx="2" ry="2" />
+<text  x="556.07" y="223.5" >khugepaged</text>
+</g>
+<g >
+<title>__select (41,000 ms, 6.61%)</title><rect x="67.1" y="181" width="78.0" height="15.0" fill="rgb(98,98,233)" rx="2" ry="2" />
+<text  x="70.07" y="191.5" >__select</text>
+</g>
+<g >
+<title>kthread (30,007 ms, 4.84%)</title><rect x="496.0" y="181" width="57.1" height="15.0" fill="rgb(132,132,197)" rx="2" ry="2" />
+<text  x="498.98" y="191.5" >kthread</text>
+</g>
+<g >
+<title>schedule (41,964 ms, 6.77%)</title><rect x="335.3" y="101" width="79.8" height="15.0" fill="rgb(113,113,209)" rx="2" ry="2" />
+<text  x="338.28" y="111.5" >schedule</text>
+</g>
+<g >
+<title>ret_from_fork (38,082 ms, 6.14%)</title><rect x="1117.5" y="197" width="72.5" height="15.0" fill="rgb(103,103,207)" rx="2" ry="2" />
+<text  x="1120.54" y="207.5" >ret_from..</text>
+</g>
+<g >
+<title>schedule (33,976 ms, 5.48%)</title><rect x="1052.5" y="149" width="64.7" height="15.0" fill="rgb(127,127,211)" rx="2" ry="2" />
+<text  x="1055.53" y="159.5" >schedule</text>
+</g>
+<g >
+<title>do_nanosleep (41,964 ms, 6.77%)</title><rect x="335.3" y="117" width="79.8" height="15.0" fill="rgb(81,81,228)" rx="2" ry="2" />
+<text  x="338.28" y="127.5" >do_nanosl..</text>
+</g>
+<g >
+<title>do_select (41,000 ms, 6.61%)</title><rect x="67.1" y="117" width="78.0" height="15.0" fill="rgb(124,124,231)" rx="2" ry="2" />
+<text  x="70.07" y="127.5" >do_select</text>
+</g>
+<g >
+<title>__schedule (75 ms, 0.01%)</title><rect x="1189.9" y="117" width="0.1" height="15.0" fill="rgb(102,102,196)" rx="2" ry="2" />
+<text  x="1192.86" y="127.5" ></text>
+</g>
+<g >
+<title>ret_from_fork (38,094 ms, 6.14%)</title><rect x="629.2" y="197" width="72.4" height="15.0" fill="rgb(109,109,195)" rx="2" ry="2" />
+<text  x="632.16" y="207.5" >ret_from..</text>
+</g>
+<g >
+<title>schedule (40,984 ms, 6.61%)</title><rect x="777.8" y="149" width="78.0" height="15.0" fill="rgb(100,100,237)" rx="2" ry="2" />
+<text  x="780.79" y="159.5" >schedule</text>
+</g>
+<g >
+<title>sys_poll (195 ms, 0.03%)</title><rect x="1117.2" y="165" width="0.3" height="15.0" fill="rgb(94,94,212)" rx="2" ry="2" />
+<text  x="1120.17" y="175.5" ></text>
+</g>
+<g >
+<title>kthread (20,273 ms, 3.27%)</title><rect x="936.6" y="181" width="38.6" height="15.0" fill="rgb(101,101,216)" rx="2" ry="2" />
+<text  x="939.60" y="191.5" >kth..</text>
+</g>
+<g >
+<title>entry_SYSCALL_64_fastpath (41,000 ms, 6.61%)</title><rect x="67.1" y="165" width="78.0" height="15.0" fill="rgb(136,136,227)" rx="2" ry="2" />
+<text  x="70.07" y="175.5" >entry_SYS..</text>
+</g>
+<g >
+<title>schedule (39,990 ms, 6.45%)</title><rect x="202.1" y="85" width="76.1" height="15.0" fill="rgb(125,125,224)" rx="2" ry="2" />
+<text  x="205.12" y="95.5" >schedule</text>
+</g>
+<g >
+<title>kthread (42,484 ms, 6.85%)</title><rect x="855.8" y="181" width="80.8" height="15.0" fill="rgb(84,84,200)" rx="2" ry="2" />
+<text  x="858.77" y="191.5" >kthread</text>
+</g>
+<g >
+<title>do_sys_poll (195 ms, 0.03%)</title><rect x="1117.2" y="149" width="0.3" height="15.0" fill="rgb(95,95,236)" rx="2" ry="2" />
+<text  x="1120.17" y="159.5" ></text>
+</g>
+<g >
+<title>worker_thread (33,976 ms, 5.48%)</title><rect x="1052.5" y="165" width="64.7" height="15.0" fill="rgb(123,123,196)" rx="2" ry="2" />
+<text  x="1055.53" y="175.5" >worker_..</text>
+</g>
+<g >
+<title>schedule_timeout (75 ms, 0.01%)</title><rect x="1189.9" y="149" width="0.1" height="15.0" fill="rgb(108,108,233)" rx="2" ry="2" />
+<text  x="1192.86" y="159.5" ></text>
+</g>
+<g >
+<title>kjournald2 (30,007 ms, 4.84%)</title><rect x="496.0" y="165" width="57.1" height="15.0" fill="rgb(94,94,203)" rx="2" ry="2" />
+<text  x="498.98" y="175.5" >kjourn..</text>
+</g>
+<g >
+<title>kworker/1:1H (20,273 ms, 3.27%)</title><rect x="936.6" y="213" width="38.6" height="15.0" fill="rgb(139,139,201)" rx="2" ry="2" />
+<text  x="939.60" y="223.5" >kwo..</text>
+</g>
+<g >
+<title>schedule (40,663 ms, 6.56%)</title><rect x="975.2" y="149" width="77.3" height="15.0" fill="rgb(102,102,243)" rx="2" ry="2" />
+<text  x="978.17" y="159.5" >schedule</text>
+</g>
+<g >
+<title>__schedule (195 ms, 0.03%)</title><rect x="1117.2" y="69" width="0.3" height="15.0" fill="rgb(116,116,210)" rx="2" ry="2" />
+<text  x="1120.17" y="79.5" ></text>
+</g>
+<g >
+<title>schedule (40,025 ms, 6.45%)</title><rect x="701.6" y="149" width="76.2" height="15.0" fill="rgb(128,128,233)" rx="2" ry="2" />
+<text  x="704.64" y="159.5" >schedule</text>
+</g>
+<g >
+<title>kthread (40,025 ms, 6.45%)</title><rect x="701.6" y="181" width="76.2" height="15.0" fill="rgb(126,126,233)" rx="2" ry="2" />
+<text  x="704.64" y="191.5" >kthread</text>
+</g>
+<g >
+<title>__nanosleep (29,997 ms, 4.84%)</title><rect x="278.2" y="197" width="57.1" height="15.0" fill="rgb(126,126,228)" rx="2" ry="2" />
+<text  x="281.20" y="207.5" >__nano..</text>
+</g>
+<g >
+<title>entry_SYSCALL_64_fastpath (29,982 ms, 4.83%)</title><rect x="145.1" y="181" width="57.0" height="15.0" fill="rgb(82,82,230)" rx="2" ry="2" />
+<text  x="148.08" y="191.5" >entry_..</text>
+</g>
+<g >
+<title>core_sys_select (41,000 ms, 6.61%)</title><rect x="67.1" y="133" width="78.0" height="15.0" fill="rgb(85,85,212)" rx="2" ry="2" />
+<text  x="70.07" y="143.5" >core_sys_..</text>
+</g>
+<g >
+<title>worker_thread (42,484 ms, 6.85%)</title><rect x="855.8" y="165" width="80.8" height="15.0" fill="rgb(98,98,213)" rx="2" ry="2" />
+<text  x="858.77" y="175.5" >worker_th..</text>
+</g>
+<g >
+<title>do_sys_poll (39,990 ms, 6.45%)</title><rect x="202.1" y="149" width="76.1" height="15.0" fill="rgb(88,88,206)" rx="2" ry="2" />
+<text  x="205.12" y="159.5" >do_sys_p..</text>
+</g>
+<g >
+<title>entry_SYSCALL_64_fastpath (29,997 ms, 4.84%)</title><rect x="278.2" y="181" width="57.1" height="15.0" fill="rgb(83,83,195)" rx="2" ry="2" />
+<text  x="281.20" y="191.5" >entry_..</text>
+</g>
+<g >
+<title>schedule_hrtimeout_range (42,500 ms, 6.85%)</title><rect x="415.1" y="101" width="80.9" height="15.0" fill="rgb(94,94,228)" rx="2" ry="2" />
+<text  x="418.12" y="111.5" >schedule_..</text>
+</g>
+<g >
+<title>schedule (42,500 ms, 6.85%)</title><rect x="415.1" y="69" width="80.9" height="15.0" fill="rgb(113,113,239)" rx="2" ry="2" />
+<text  x="418.12" y="79.5" >schedule</text>
+</g>
+<g >
+<title>schedule (42,484 ms, 6.85%)</title><rect x="855.8" y="149" width="80.8" height="15.0" fill="rgb(104,104,201)" rx="2" ry="2" />
+<text  x="858.77" y="159.5" >schedule</text>
+</g>
+<g >
+<title>schedule (30,007 ms, 4.84%)</title><rect x="496.0" y="149" width="57.1" height="15.0" fill="rgb(82,82,227)" rx="2" ry="2" />
+<text  x="498.98" y="159.5" >schedule</text>
+</g>
+<g >
+<title>sys_nanosleep (29,997 ms, 4.84%)</title><rect x="278.2" y="165" width="57.1" height="15.0" fill="rgb(103,103,218)" rx="2" ry="2" />
+<text  x="281.20" y="175.5" >sys_na..</text>
+</g>
+<g >
+<title>dm_wait_event (29,997 ms, 4.84%)</title><rect x="10.0" y="85" width="57.1" height="15.0" fill="rgb(95,95,220)" rx="2" ry="2" />
+<text  x="13.00" y="95.5" >dm_wai..</text>
+</g>
+<g >
+<title>__schedule (38,094 ms, 6.14%)</title><rect x="629.2" y="133" width="72.4" height="15.0" fill="rgb(128,128,226)" rx="2" ry="2" />
+<text  x="632.16" y="143.5" >__schedule</text>
+</g>
+<g >
+<title>futex_wait_queue_me (29,982 ms, 4.83%)</title><rect x="145.1" y="117" width="57.0" height="15.0" fill="rgb(84,84,222)" rx="2" ry="2" />
+<text  x="148.08" y="127.5" >futex_..</text>
+</g>
+<g >
+<title>hrtimer_nanosleep (41,964 ms, 6.77%)</title><rect x="335.3" y="133" width="79.8" height="15.0" fill="rgb(113,113,238)" rx="2" ry="2" />
+<text  x="338.28" y="143.5" >hrtimer_n..</text>
+</g>
+<g >
+<title>poll_schedule_timeout (41,000 ms, 6.61%)</title><rect x="67.1" y="101" width="78.0" height="15.0" fill="rgb(101,101,211)" rx="2" ry="2" />
+<text  x="70.07" y="111.5" >poll_sche..</text>
+</g>
+</g>
+</svg>

@@ -1,0 +1,861 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1200" height="438" onload="init(evt)" viewBox="0 0 1200 438" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs>
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	text { font-family:Verdana; font-size:12px; fill:rgb(0,0,0); }
+	#search { opacity:0.1; cursor:pointer; }
+	#search:hover, #search.show { opacity:1; }
+	#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+	#title { text-anchor:middle; font-size:17px}
+	#unzoom { cursor:pointer; }
+	#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.hide { display:none; }
+	.parent { opacity:0.5; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	"use strict";
+	var details, searchbtn, unzoombtn, matchedtxt, svg, searching;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		unzoombtn = document.getElementById("unzoom");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+	}
+
+	window.addEventListener("click", function(e) {
+		var target = find_group(e.target);
+		if (target) {
+			if (target.nodeName == "a") {
+				if (e.ctrlKey === false) return;
+				e.preventDefault();
+			}
+			if (target.classList.contains("parent")) unzoom();
+			zoom(target);
+		}
+		else if (e.target.id == "unzoom") unzoom();
+		else if (e.target.id == "search") search_prompt();
+	}, false)
+
+	// mouse-over for info
+	// show
+	window.addEventListener("mouseover", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = "Function: " + g_to_text(target);
+	}, false)
+
+	// clear
+	window.addEventListener("mouseout", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = ' ';
+	}, false)
+
+	// ctrl-F for search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+	}, false)
+
+	// functions
+	function find_child(node, selector) {
+		var children = node.querySelectorAll(selector);
+		if (children.length) return children[0];
+		return;
+	}
+	function find_group(node) {
+		var parent = node.parentElement;
+		if (!parent) return;
+		if (parent.id == "frames") return node;
+		return find_group(parent);
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_" + attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_" + attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes.width.value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes.x.value = parseFloat(r.attributes.x.value) + 3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2 * 12 * 0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		// Fit in full text width
+		if (/^ *$/.test(txt) || t.getSubStringLength(0, txt.length) < w)
+			return;
+
+		for (var x = txt.length - 2; x > 0; x--) {
+			if (t.getSubStringLength(0, x + 2) <= w) {
+				t.textContent = txt.substring(0, x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = (parseFloat(e.attributes.x.value) - x - 10) * ratio + 10;
+				if (e.tagName == "text")
+					e.attributes.x.value = find_child(e.parentNode, "rect[x]").attributes.x.value + 3;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseFloat(e.attributes.width.value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_child(c[i], x - 10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = 10;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseInt(svg.width.baseVal.value) - (10 * 2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr.width.value);
+		var xmin = parseFloat(attr.x.value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr.y.value);
+		var ratio = (svg.width.baseVal.value - 2 * 10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		unzoombtn.classList.remove("hide");
+
+		var el = document.getElementById("frames").children;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a.x.value);
+			var ew = parseFloat(a.width.value);
+			var upstack;
+			// Is it an ancestor
+			if (0 == 0) {
+				upstack = parseFloat(a.y.value) > ymin;
+			} else {
+				upstack = parseFloat(a.y.value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.classList.add("parent");
+					zoom_parent(e);
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.classList.add("hide");
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.classList.add("hide");
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					update_text(e);
+				}
+			}
+		}
+	}
+	function unzoom() {
+		unzoombtn.classList.add("hide");
+		var el = document.getElementById("frames").children;
+		for(var i = 0; i < el.length; i++) {
+			el[i].classList.remove("parent");
+			el[i].classList.remove("hide");
+			zoom_reset(el[i]);
+			update_text(el[i]);
+		}
+	}
+
+	// search
+	function reset_search() {
+		var el = document.querySelectorAll("#frames rect");
+		for (var i = 0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)", "");
+			if (term != null) {
+				search(term)
+			}
+		} else {
+			reset_search();
+			searching = 0;
+			searchbtn.classList.remove("show");
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.classList.add("hide");
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		var re = new RegExp(term);
+		var el = document.getElementById("frames").children;
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes.width.value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes.x.value);
+				orig_save(rect, "fill");
+				rect.attributes.fill.value = "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+
+		searchbtn.classList.add("show");
+		searchbtn.firstChild.nodeValue = "Reset Search";
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.classList.remove("hide");
+		var pct = 100 * count / maxwidth;
+		if (pct != 100) pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1200.0" height="438.0" fill="url(#background)"  />
+<text id="title" x="600.00" y="24" >Flame Graph</text>
+<text id="details" x="10.00" y="421" > </text>
+<text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
+<text id="search" x="1090.00" y="24" >Search</text>
+<text id="matched" x="1090.00" y="421" > </text>
+<g id="frames">
+<g >
+<title>ext4_reserve_inode_write (1 samples, 0.21%)</title><rect x="110.9" y="149" width="2.5" height="15.0" fill="rgb(224,169,0)" rx="2" ry="2" />
+<text  x="113.85" y="159.5" ></text>
+</g>
+<g >
+<title>dma_pool_alloc (1 samples, 0.21%)</title><rect x="123.5" y="53" width="2.5" height="15.0" fill="rgb(225,102,54)" rx="2" ry="2" />
+<text  x="126.46" y="63.5" ></text>
+</g>
+<g >
+<title>sys_write (25 samples, 5.34%)</title><rect x="57.9" y="325" width="63.0" height="15.0" fill="rgb(247,184,9)" rx="2" ry="2" />
+<text  x="60.91" y="335.5" >sys_wr..</text>
+</g>
+<g >
+<title>__lru_cache_add (2 samples, 0.43%)</title><rect x="27.6" y="149" width="5.1" height="15.0" fill="rgb(229,100,18)" rx="2" ry="2" />
+<text  x="30.65" y="159.5" ></text>
+</g>
+<g >
+<title>generic_perform_write (25 samples, 5.34%)</title><rect x="57.9" y="245" width="63.0" height="15.0" fill="rgb(241,74,30)" rx="2" ry="2" />
+<text  x="60.91" y="255.5" >generi..</text>
+</g>
+<g >
+<title>__writeback_inodes_wb (5 samples, 1.07%)</title><rect x="120.9" y="261" width="12.6" height="15.0" fill="rgb(221,89,12)" rx="2" ry="2" />
+<text  x="123.94" y="271.5" ></text>
+</g>
+<g >
+<title>all (468 samples, 100%)</title><rect x="10.0" y="389" width="1180.0" height="15.0" fill="rgb(220,36,46)" rx="2" ry="2" />
+<text  x="13.00" y="399.5" ></text>
+</g>
+<g >
+<title>ext4_block_write_begin (2 samples, 0.43%)</title><rect x="83.1" y="213" width="5.1" height="15.0" fill="rgb(243,186,19)" rx="2" ry="2" />
+<text  x="86.12" y="223.5" ></text>
+</g>
+<g >
+<title>kmem_cache_alloc (1 samples, 0.21%)</title><rect x="83.1" y="149" width="2.5" height="15.0" fill="rgb(212,28,19)" rx="2" ry="2" />
+<text  x="86.12" y="159.5" ></text>
+</g>
+<g >
+<title>alloc_pages_current (3 samples, 0.64%)</title><rect x="88.2" y="165" width="7.5" height="15.0" fill="rgb(252,34,2)" rx="2" ry="2" />
+<text  x="91.16" y="175.5" ></text>
+</g>
+<g >
+<title>__lock_text_start (2 samples, 0.43%)</title><rect x="27.6" y="117" width="5.1" height="15.0" fill="rgb(246,26,30)" rx="2" ry="2" />
+<text  x="30.65" y="127.5" ></text>
+</g>
+<g >
+<title>bio_alloc_bioset (2 samples, 0.43%)</title><rect x="47.8" y="117" width="5.1" height="15.0" fill="rgb(253,85,42)" rx="2" ry="2" />
+<text  x="50.82" y="127.5" ></text>
+</g>
+<g >
+<title>__do_page_cache_readahead (13 samples, 2.78%)</title><rect x="25.1" y="229" width="32.8" height="15.0" fill="rgb(247,59,10)" rx="2" ry="2" />
+<text  x="28.13" y="239.5" >__..</text>
+</g>
+<g >
+<title>ext4_get_group_desc (1 samples, 0.21%)</title><rect x="110.9" y="117" width="2.5" height="15.0" fill="rgb(248,27,2)" rx="2" ry="2" />
+<text  x="113.85" y="127.5" ></text>
+</g>
+<g >
+<title>read (19 samples, 4.06%)</title><rect x="10.0" y="357" width="47.9" height="15.0" fill="rgb(240,128,46)" rx="2" ry="2" />
+<text  x="13.00" y="367.5" >read</text>
+</g>
+<g >
+<title>__alloc_pages_nodemask (3 samples, 0.64%)</title><rect x="88.2" y="149" width="7.5" height="15.0" fill="rgb(228,75,2)" rx="2" ry="2" />
+<text  x="91.16" y="159.5" ></text>
+</g>
+<g >
+<title>ext4_mark_inode_dirty (2 samples, 0.43%)</title><rect x="108.3" y="165" width="5.1" height="15.0" fill="rgb(236,54,24)" rx="2" ry="2" />
+<text  x="111.33" y="175.5" ></text>
+</g>
+<g >
+<title>__dquot_alloc_space (1 samples, 0.21%)</title><rect x="85.6" y="181" width="2.6" height="15.0" fill="rgb(238,93,51)" rx="2" ry="2" />
+<text  x="88.64" y="191.5" ></text>
+</g>
+<g >
+<title>_raw_spin_lock (1 samples, 0.21%)</title><rect x="85.6" y="165" width="2.6" height="15.0" fill="rgb(219,37,20)" rx="2" ry="2" />
+<text  x="88.64" y="175.5" ></text>
+</g>
+<g >
+<title>submit_bio (2 samples, 0.43%)</title><rect x="120.9" y="117" width="5.1" height="15.0" fill="rgb(237,106,41)" rx="2" ry="2" />
+<text  x="123.94" y="127.5" ></text>
+</g>
+<g >
+<title>blk_attempt_plug_merge (2 samples, 0.43%)</title><rect x="37.7" y="149" width="5.1" height="15.0" fill="rgb(228,72,23)" rx="2" ry="2" />
+<text  x="40.74" y="159.5" ></text>
+</g>
+<g >
+<title>jbd2_journal_stop (1 samples, 0.21%)</title><rect x="105.8" y="197" width="2.5" height="15.0" fill="rgb(220,81,20)" rx="2" ry="2" />
+<text  x="108.81" y="207.5" ></text>
+</g>
+<g >
+<title>part_round_stats (1 samples, 0.21%)</title><rect x="55.4" y="117" width="2.5" height="15.0" fill="rgb(245,84,1)" rx="2" ry="2" />
+<text  x="58.38" y="127.5" ></text>
+</g>
+<g >
+<title>entry_SYSCALL_64_fastpath (19 samples, 4.06%)</title><rect x="10.0" y="341" width="47.9" height="15.0" fill="rgb(220,178,43)" rx="2" ry="2" />
+<text  x="13.00" y="351.5" >entr..</text>
+</g>
+<g >
+<title>get_page_from_freelist (3 samples, 0.64%)</title><rect x="88.2" y="133" width="7.5" height="15.0" fill="rgb(210,148,18)" rx="2" ry="2" />
+<text  x="91.16" y="143.5" ></text>
+</g>
+<g >
+<title>__split_and_process_bio (6 samples, 1.28%)</title><rect x="42.8" y="133" width="15.1" height="15.0" fill="rgb(215,20,47)" rx="2" ry="2" />
+<text  x="45.78" y="143.5" ></text>
+</g>
+<g >
+<title>mpage_prepare_extent_to_map (3 samples, 0.64%)</title><rect x="126.0" y="181" width="7.5" height="15.0" fill="rgb(218,135,33)" rx="2" ry="2" />
+<text  x="128.98" y="191.5" ></text>
+</g>
+<g >
+<title>lru_cache_add (1 samples, 0.21%)</title><rect x="100.8" y="165" width="2.5" height="15.0" fill="rgb(234,39,49)" rx="2" ry="2" />
+<text  x="103.77" y="175.5" ></text>
+</g>
+<g >
+<title>start_this_handle (1 samples, 0.21%)</title><rect x="80.6" y="181" width="2.5" height="15.0" fill="rgb(233,139,27)" rx="2" ry="2" />
+<text  x="83.60" y="191.5" ></text>
+</g>
+<g >
+<title>ret_from_fork (5 samples, 1.07%)</title><rect x="120.9" y="357" width="12.6" height="15.0" fill="rgb(216,82,54)" rx="2" ry="2" />
+<text  x="123.94" y="367.5" ></text>
+</g>
+<g >
+<title>__ext4_get_inode_loc (1 samples, 0.21%)</title><rect x="110.9" y="133" width="2.5" height="15.0" fill="rgb(218,151,44)" rx="2" ry="2" />
+<text  x="113.85" y="143.5" ></text>
+</g>
+<g >
+<title>native_safe_halt (217 samples, 46.37%)</title><rect x="133.5" y="277" width="547.2" height="15.0" fill="rgb(229,72,0)" rx="2" ry="2" />
+<text  x="136.55" y="287.5" >native_safe_halt</text>
+</g>
+<g >
+<title>create_empty_buffers (1 samples, 0.21%)</title><rect x="83.1" y="197" width="2.5" height="15.0" fill="rgb(217,7,40)" rx="2" ry="2" />
+<text  x="86.12" y="207.5" ></text>
+</g>
+<g >
+<title>schedule_preempt_disabled (1 samples, 0.21%)</title><rect x="1187.5" y="277" width="2.5" height="15.0" fill="rgb(226,25,53)" rx="2" ry="2" />
+<text  x="1190.48" y="287.5" ></text>
+</g>
+<g >
+<title>copy_user_enhanced_fast_string (6 samples, 1.28%)</title><rect x="10.0" y="261" width="15.1" height="15.0" fill="rgb(212,207,8)" rx="2" ry="2" />
+<text  x="13.00" y="271.5" ></text>
+</g>
+<g >
+<title>swapper (419 samples, 89.53%)</title><rect x="133.5" y="373" width="1056.5" height="15.0" fill="rgb(242,203,22)" rx="2" ry="2" />
+<text  x="136.55" y="383.5" >swapper</text>
+</g>
+<g >
+<title>alloc_buffer_head (1 samples, 0.21%)</title><rect x="83.1" y="165" width="2.5" height="15.0" fill="rgb(245,0,32)" rx="2" ry="2" />
+<text  x="86.12" y="175.5" ></text>
+</g>
+<g >
+<title>cpu_startup_entry (217 samples, 46.37%)</title><rect x="133.5" y="341" width="547.2" height="15.0" fill="rgb(216,79,47)" rx="2" ry="2" />
+<text  x="136.55" y="351.5" >cpu_startup_entry</text>
+</g>
+<g >
+<title>__map_bio (1 samples, 0.21%)</title><rect x="45.3" y="117" width="2.5" height="15.0" fill="rgb(233,148,6)" rx="2" ry="2" />
+<text  x="48.30" y="127.5" ></text>
+</g>
+<g >
+<title>ext4_dirty_inode (2 samples, 0.43%)</title><rect x="108.3" y="181" width="5.1" height="15.0" fill="rgb(211,168,18)" rx="2" ry="2" />
+<text  x="111.33" y="191.5" ></text>
+</g>
+<g >
+<title>worker_thread (5 samples, 1.07%)</title><rect x="120.9" y="325" width="12.6" height="15.0" fill="rgb(224,110,54)" rx="2" ry="2" />
+<text  x="123.94" y="335.5" ></text>
+</g>
+<g >
+<title>__add_to_page_cache_locked (1 samples, 0.21%)</title><rect x="98.2" y="165" width="2.6" height="15.0" fill="rgb(223,193,33)" rx="2" ry="2" />
+<text  x="101.25" y="175.5" ></text>
+</g>
+<g >
+<title>find_get_pages_tag (2 samples, 0.43%)</title><rect x="128.5" y="149" width="5.0" height="15.0" fill="rgb(237,202,18)" rx="2" ry="2" />
+<text  x="131.50" y="159.5" ></text>
+</g>
+<g >
+<title>pagevec_lru_move_fn (2 samples, 0.43%)</title><rect x="27.6" y="133" width="5.1" height="15.0" fill="rgb(226,204,51)" rx="2" ry="2" />
+<text  x="30.65" y="143.5" ></text>
+</g>
+<g >
+<title>default_idle (217 samples, 46.37%)</title><rect x="133.5" y="293" width="547.2" height="15.0" fill="rgb(216,30,6)" rx="2" ry="2" />
+<text  x="136.55" y="303.5" >default_idle</text>
+</g>
+<g >
+<title>alloc_page_buffers (1 samples, 0.21%)</title><rect x="83.1" y="181" width="2.5" height="15.0" fill="rgb(237,152,9)" rx="2" ry="2" />
+<text  x="86.12" y="191.5" ></text>
+</g>
+<g >
+<title>wb_writeback (5 samples, 1.07%)</title><rect x="120.9" y="277" width="12.6" height="15.0" fill="rgb(225,190,8)" rx="2" ry="2" />
+<text  x="123.94" y="287.5" ></text>
+</g>
+<g >
+<title>cp (44 samples, 9.40%)</title><rect x="10.0" y="373" width="110.9" height="15.0" fill="rgb(252,186,21)" rx="2" ry="2" />
+<text  x="13.00" y="383.5" >cp</text>
+</g>
+<g >
+<title>jbd2__journal_start (1 samples, 0.21%)</title><rect x="80.6" y="197" width="2.5" height="15.0" fill="rgb(243,172,31)" rx="2" ry="2" />
+<text  x="83.60" y="207.5" ></text>
+</g>
+<g >
+<title>wb_workfn (5 samples, 1.07%)</title><rect x="120.9" y="293" width="12.6" height="15.0" fill="rgb(243,69,45)" rx="2" ry="2" />
+<text  x="123.94" y="303.5" ></text>
+</g>
+<g >
+<title>generic_make_request (10 samples, 2.14%)</title><rect x="32.7" y="165" width="25.2" height="15.0" fill="rgb(233,220,52)" rx="2" ry="2" />
+<text  x="35.69" y="175.5" >g..</text>
+</g>
+<g >
+<title>x86_64_start_kernel (202 samples, 43.16%)</title><rect x="680.7" y="357" width="509.3" height="15.0" fill="rgb(224,145,3)" rx="2" ry="2" />
+<text  x="683.68" y="367.5" >x86_64_start_kernel</text>
+</g>
+<g >
+<title>__vfs_read (19 samples, 4.06%)</title><rect x="10.0" y="293" width="47.9" height="15.0" fill="rgb(252,220,18)" rx="2" ry="2" />
+<text  x="13.00" y="303.5" >__vf..</text>
+</g>
+<g >
+<title>start_kernel (202 samples, 43.16%)</title><rect x="680.7" y="325" width="509.3" height="15.0" fill="rgb(226,197,3)" rx="2" ry="2" />
+<text  x="683.68" y="335.5" >start_kernel</text>
+</g>
+<g >
+<title>generic_write_end (5 samples, 1.07%)</title><rect x="108.3" y="213" width="12.6" height="15.0" fill="rgb(243,8,50)" rx="2" ry="2" />
+<text  x="111.33" y="223.5" ></text>
+</g>
+<g >
+<title>native_safe_halt (201 samples, 42.95%)</title><rect x="680.7" y="229" width="506.8" height="15.0" fill="rgb(214,190,12)" rx="2" ry="2" />
+<text  x="683.68" y="239.5" >native_safe_halt</text>
+</g>
+<g >
+<title>__generic_file_write_iter (25 samples, 5.34%)</title><rect x="57.9" y="261" width="63.0" height="15.0" fill="rgb(253,14,53)" rx="2" ry="2" />
+<text  x="60.91" y="271.5" >__gene..</text>
+</g>
+<g >
+<title>mempool_alloc_slab (2 samples, 0.43%)</title><rect x="47.8" y="85" width="5.1" height="15.0" fill="rgb(209,211,15)" rx="2" ry="2" />
+<text  x="50.82" y="95.5" ></text>
+</g>
+<g >
+<title>__blk_mq_alloc_request (1 samples, 0.21%)</title><rect x="120.9" y="53" width="2.6" height="15.0" fill="rgb(218,189,42)" rx="2" ry="2" />
+<text  x="123.94" y="63.5" ></text>
+</g>
+<g >
+<title>__ext4_handle_dirty_metadata (1 samples, 0.21%)</title><rect x="108.3" y="133" width="2.6" height="15.0" fill="rgb(236,180,8)" rx="2" ry="2" />
+<text  x="111.33" y="143.5" ></text>
+</g>
+<g >
+<title>__lock_text_start (1 samples, 0.21%)</title><rect x="123.5" y="37" width="2.5" height="15.0" fill="rgb(210,102,14)" rx="2" ry="2" />
+<text  x="126.46" y="47.5" ></text>
+</g>
+<g >
+<title>ext4_mark_iloc_dirty (1 samples, 0.21%)</title><rect x="108.3" y="149" width="2.6" height="15.0" fill="rgb(242,31,25)" rx="2" ry="2" />
+<text  x="111.33" y="159.5" ></text>
+</g>
+<g >
+<title>vfs_read (19 samples, 4.06%)</title><rect x="10.0" y="309" width="47.9" height="15.0" fill="rgb(240,9,36)" rx="2" ry="2" />
+<text  x="13.00" y="319.5" >vfs_..</text>
+</g>
+<g >
+<title>ext4_file_write_iter (25 samples, 5.34%)</title><rect x="57.9" y="277" width="63.0" height="15.0" fill="rgb(226,38,34)" rx="2" ry="2" />
+<text  x="60.91" y="287.5" >ext4_f..</text>
+</g>
+<g >
+<title>dm_table_find_target (1 samples, 0.21%)</title><rect x="52.9" y="117" width="2.5" height="15.0" fill="rgb(230,212,29)" rx="2" ry="2" />
+<text  x="55.86" y="127.5" ></text>
+</g>
+<g >
+<title>__page_cache_alloc (3 samples, 0.64%)</title><rect x="88.2" y="181" width="7.5" height="15.0" fill="rgb(245,121,37)" rx="2" ry="2" />
+<text  x="91.16" y="191.5" ></text>
+</g>
+<g >
+<title>sys_read (19 samples, 4.06%)</title><rect x="10.0" y="325" width="47.9" height="15.0" fill="rgb(241,205,1)" rx="2" ry="2" />
+<text  x="13.00" y="335.5" >sys_..</text>
+</g>
+<g >
+<title>x86_64_start_reservations (202 samples, 43.16%)</title><rect x="680.7" y="341" width="509.3" height="15.0" fill="rgb(250,172,21)" rx="2" ry="2" />
+<text  x="683.68" y="351.5" >x86_64_start_reservations</text>
+</g>
+<g >
+<title>entry_SYSCALL_64_fastpath (25 samples, 5.34%)</title><rect x="57.9" y="341" width="63.0" height="15.0" fill="rgb(252,36,25)" rx="2" ry="2" />
+<text  x="60.91" y="351.5" >entry_..</text>
+</g>
+<g >
+<title>arch_cpu_idle (201 samples, 42.95%)</title><rect x="680.7" y="261" width="506.8" height="15.0" fill="rgb(248,167,52)" rx="2" ry="2" />
+<text  x="683.68" y="271.5" >arch_cpu_idle</text>
+</g>
+<g >
+<title>blk_mq_map_request (1 samples, 0.21%)</title><rect x="120.9" y="69" width="2.6" height="15.0" fill="rgb(213,95,50)" rx="2" ry="2" />
+<text  x="123.94" y="79.5" ></text>
+</g>
+<g >
+<title>pagevec_lookup_tag (2 samples, 0.43%)</title><rect x="128.5" y="165" width="5.0" height="15.0" fill="rgb(216,131,5)" rx="2" ry="2" />
+<text  x="131.50" y="175.5" ></text>
+</g>
+<g >
+<title>kmem_cache_alloc (2 samples, 0.43%)</title><rect x="47.8" y="69" width="5.1" height="15.0" fill="rgb(221,92,1)" rx="2" ry="2" />
+<text  x="50.82" y="79.5" ></text>
+</g>
+<g >
+<title>__ext4_journal_stop (1 samples, 0.21%)</title><rect x="105.8" y="213" width="2.5" height="15.0" fill="rgb(248,70,42)" rx="2" ry="2" />
+<text  x="108.81" y="223.5" ></text>
+</g>
+<g >
+<title>default_idle (201 samples, 42.95%)</title><rect x="680.7" y="245" width="506.8" height="15.0" fill="rgb(233,17,50)" rx="2" ry="2" />
+<text  x="683.68" y="255.5" >default_idle</text>
+</g>
+<g >
+<title>ondemand_readahead (13 samples, 2.78%)</title><rect x="25.1" y="245" width="32.8" height="15.0" fill="rgb(219,53,25)" rx="2" ry="2" />
+<text  x="28.13" y="255.5" >on..</text>
+</g>
+<g >
+<title>process_one_work (5 samples, 1.07%)</title><rect x="120.9" y="309" width="12.6" height="15.0" fill="rgb(205,172,19)" rx="2" ry="2" />
+<text  x="123.94" y="319.5" ></text>
+</g>
+<g >
+<title>__block_commit_write.isra.21 (2 samples, 0.43%)</title><rect x="115.9" y="181" width="5.0" height="15.0" fill="rgb(253,97,26)" rx="2" ry="2" />
+<text  x="118.90" y="191.5" ></text>
+</g>
+<g >
+<title>cpu_startup_entry (202 samples, 43.16%)</title><rect x="680.7" y="293" width="509.3" height="15.0" fill="rgb(236,63,7)" rx="2" ry="2" />
+<text  x="683.68" y="303.5" >cpu_startup_entry</text>
+</g>
+<g >
+<title>mempool_alloc (2 samples, 0.43%)</title><rect x="47.8" y="101" width="5.1" height="15.0" fill="rgb(210,54,30)" rx="2" ry="2" />
+<text  x="50.82" y="111.5" ></text>
+</g>
+<g >
+<title>add_to_page_cache_lru (2 samples, 0.43%)</title><rect x="27.6" y="181" width="5.1" height="15.0" fill="rgb(208,132,24)" rx="2" ry="2" />
+<text  x="30.65" y="191.5" ></text>
+</g>
+<g >
+<title>__lru_cache_add (1 samples, 0.21%)</title><rect x="100.8" y="149" width="2.5" height="15.0" fill="rgb(247,92,0)" rx="2" ry="2" />
+<text  x="103.77" y="159.5" ></text>
+</g>
+<g >
+<title>__ext4_journal_start_sb (1 samples, 0.21%)</title><rect x="80.6" y="213" width="2.5" height="15.0" fill="rgb(217,150,48)" rx="2" ry="2" />
+<text  x="83.60" y="223.5" ></text>
+</g>
+<g >
+<title>__slab_alloc (1 samples, 0.21%)</title><rect x="83.1" y="133" width="2.5" height="15.0" fill="rgb(222,103,6)" rx="2" ry="2" />
+<text  x="86.12" y="143.5" ></text>
+</g>
+<g >
+<title>submit_bio (10 samples, 2.14%)</title><rect x="32.7" y="181" width="25.2" height="15.0" fill="rgb(230,177,46)" rx="2" ry="2" />
+<text  x="35.69" y="191.5" >s..</text>
+</g>
+<g >
+<title>__wake_up_bit (1 samples, 0.21%)</title><rect x="103.3" y="197" width="2.5" height="15.0" fill="rgb(243,124,45)" rx="2" ry="2" />
+<text  x="106.29" y="207.5" ></text>
+</g>
+<g >
+<title>ext4_readpages (13 samples, 2.78%)</title><rect x="25.1" y="213" width="32.8" height="15.0" fill="rgb(246,119,40)" rx="2" ry="2" />
+<text  x="28.13" y="223.5" >ex..</text>
+</g>
+<g >
+<title>dm_make_request (6 samples, 1.28%)</title><rect x="42.8" y="149" width="15.1" height="15.0" fill="rgb(224,75,4)" rx="2" ry="2" />
+<text  x="45.78" y="159.5" ></text>
+</g>
+<g >
+<title>copy_user_enhanced_fast_string (9 samples, 1.92%)</title><rect x="57.9" y="229" width="22.7" height="15.0" fill="rgb(227,62,29)" rx="2" ry="2" />
+<text  x="60.91" y="239.5" >c..</text>
+</g>
+<g >
+<title>blk_mq_make_request (2 samples, 0.43%)</title><rect x="120.9" y="85" width="5.1" height="15.0" fill="rgb(239,225,38)" rx="2" ry="2" />
+<text  x="123.94" y="95.5" ></text>
+</g>
+<g >
+<title>__radix_tree_preload (1 samples, 0.21%)</title><rect x="98.2" y="149" width="2.6" height="15.0" fill="rgb(212,209,29)" rx="2" ry="2" />
+<text  x="101.25" y="159.5" ></text>
+</g>
+<g >
+<title>ext4_da_write_begin (10 samples, 2.14%)</title><rect x="80.6" y="229" width="25.2" height="15.0" fill="rgb(231,42,49)" rx="2" ry="2" />
+<text  x="83.60" y="239.5" >e..</text>
+</g>
+<g >
+<title>finish_task_switch (1 samples, 0.21%)</title><rect x="1187.5" y="229" width="2.5" height="15.0" fill="rgb(229,5,16)" rx="2" ry="2" />
+<text  x="1190.48" y="239.5" ></text>
+</g>
+<g >
+<title>add_to_page_cache_lru (3 samples, 0.64%)</title><rect x="95.7" y="181" width="7.6" height="15.0" fill="rgb(233,171,49)" rx="2" ry="2" />
+<text  x="98.73" y="191.5" ></text>
+</g>
+<g >
+<title>start_secondary (217 samples, 46.37%)</title><rect x="133.5" y="357" width="547.2" height="15.0" fill="rgb(218,225,52)" rx="2" ry="2" />
+<text  x="136.55" y="367.5" >start_secondary</text>
+</g>
+<g >
+<title>__schedule (1 samples, 0.21%)</title><rect x="1187.5" y="245" width="2.5" height="15.0" fill="rgb(247,184,49)" rx="2" ry="2" />
+<text  x="1190.48" y="255.5" ></text>
+</g>
+<g >
+<title>default_idle_call (217 samples, 46.37%)</title><rect x="133.5" y="325" width="547.2" height="15.0" fill="rgb(239,227,10)" rx="2" ry="2" />
+<text  x="136.55" y="335.5" >default_idle_call</text>
+</g>
+<g >
+<title>ext4_bio_write_page (2 samples, 0.43%)</title><rect x="120.9" y="149" width="5.1" height="15.0" fill="rgb(224,9,6)" rx="2" ry="2" />
+<text  x="123.94" y="159.5" ></text>
+</g>
+<g >
+<title>block_write_end (3 samples, 0.64%)</title><rect x="113.4" y="197" width="7.5" height="15.0" fill="rgb(239,62,46)" rx="2" ry="2" />
+<text  x="116.38" y="207.5" ></text>
+</g>
+<g >
+<title>mpage_submit_page (2 samples, 0.43%)</title><rect x="120.9" y="165" width="5.1" height="15.0" fill="rgb(226,104,22)" rx="2" ry="2" />
+<text  x="123.94" y="175.5" ></text>
+</g>
+<g >
+<title>ext4_da_get_block_prep (1 samples, 0.21%)</title><rect x="85.6" y="197" width="2.6" height="15.0" fill="rgb(219,100,9)" rx="2" ry="2" />
+<text  x="88.64" y="207.5" ></text>
+</g>
+<g >
+<title>nvme_queue_rq (1 samples, 0.21%)</title><rect x="123.5" y="69" width="2.5" height="15.0" fill="rgb(247,37,33)" rx="2" ry="2" />
+<text  x="126.46" y="79.5" ></text>
+</g>
+<g >
+<title>do_writepages (5 samples, 1.07%)</title><rect x="120.9" y="213" width="12.6" height="15.0" fill="rgb(254,202,37)" rx="2" ry="2" />
+<text  x="123.94" y="223.5" ></text>
+</g>
+<g >
+<title>vfs_write (25 samples, 5.34%)</title><rect x="57.9" y="309" width="63.0" height="15.0" fill="rgb(254,71,17)" rx="2" ry="2" />
+<text  x="60.91" y="319.5" >vfs_wr..</text>
+</g>
+<g >
+<title>ext4_da_write_end (6 samples, 1.28%)</title><rect x="105.8" y="229" width="15.1" height="15.0" fill="rgb(219,158,42)" rx="2" ry="2" />
+<text  x="108.81" y="239.5" ></text>
+</g>
+<g >
+<title>ext4_io_submit (2 samples, 0.43%)</title><rect x="120.9" y="133" width="5.1" height="15.0" fill="rgb(220,39,22)" rx="2" ry="2" />
+<text  x="123.94" y="143.5" ></text>
+</g>
+<g >
+<title>mpage_process_page_bufs (1 samples, 0.21%)</title><rect x="126.0" y="165" width="2.5" height="15.0" fill="rgb(236,149,27)" rx="2" ry="2" />
+<text  x="128.98" y="175.5" ></text>
+</g>
+<g >
+<title>rest_init (202 samples, 43.16%)</title><rect x="680.7" y="309" width="509.3" height="15.0" fill="rgb(226,216,51)" rx="2" ry="2" />
+<text  x="683.68" y="319.5" >rest_init</text>
+</g>
+<g >
+<title>writeback_sb_inodes (5 samples, 1.07%)</title><rect x="120.9" y="245" width="12.6" height="15.0" fill="rgb(205,171,51)" rx="2" ry="2" />
+<text  x="123.94" y="255.5" ></text>
+</g>
+<g >
+<title>unlock_page (1 samples, 0.21%)</title><rect x="103.3" y="213" width="2.5" height="15.0" fill="rgb(254,148,28)" rx="2" ry="2" />
+<text  x="106.29" y="223.5" ></text>
+</g>
+<g >
+<title>bt_get (1 samples, 0.21%)</title><rect x="120.9" y="37" width="2.6" height="15.0" fill="rgb(215,177,32)" rx="2" ry="2" />
+<text  x="123.94" y="47.5" ></text>
+</g>
+<g >
+<title>generic_file_read_iter (19 samples, 4.06%)</title><rect x="10.0" y="277" width="47.9" height="15.0" fill="rgb(211,65,30)" rx="2" ry="2" />
+<text  x="13.00" y="287.5" >gene..</text>
+</g>
+<g >
+<title>kworker/u4:1 (5 samples, 1.07%)</title><rect x="120.9" y="373" width="12.6" height="15.0" fill="rgb(254,67,26)" rx="2" ry="2" />
+<text  x="123.94" y="383.5" ></text>
+</g>
+<g >
+<title>ext4_writepages (5 samples, 1.07%)</title><rect x="120.9" y="197" width="12.6" height="15.0" fill="rgb(229,92,21)" rx="2" ry="2" />
+<text  x="123.94" y="207.5" ></text>
+</g>
+<g >
+<title>default_idle_call (201 samples, 42.95%)</title><rect x="680.7" y="277" width="506.8" height="15.0" fill="rgb(234,165,54)" rx="2" ry="2" />
+<text  x="683.68" y="287.5" >default_idle_call</text>
+</g>
+<g >
+<title>kthread (5 samples, 1.07%)</title><rect x="120.9" y="341" width="12.6" height="15.0" fill="rgb(227,147,17)" rx="2" ry="2" />
+<text  x="123.94" y="351.5" ></text>
+</g>
+<g >
+<title>ext4_mpage_readpages (13 samples, 2.78%)</title><rect x="25.1" y="197" width="32.8" height="15.0" fill="rgb(250,110,43)" rx="2" ry="2" />
+<text  x="28.13" y="207.5" >ex..</text>
+</g>
+<g >
+<title>schedule (1 samples, 0.21%)</title><rect x="1187.5" y="261" width="2.5" height="15.0" fill="rgb(243,53,32)" rx="2" ry="2" />
+<text  x="1190.48" y="271.5" ></text>
+</g>
+<g >
+<title>generic_make_request (2 samples, 0.43%)</title><rect x="120.9" y="101" width="5.1" height="15.0" fill="rgb(246,1,26)" rx="2" ry="2" />
+<text  x="123.94" y="111.5" ></text>
+</g>
+<g >
+<title>lru_cache_add (2 samples, 0.43%)</title><rect x="27.6" y="165" width="5.1" height="15.0" fill="rgb(251,133,43)" rx="2" ry="2" />
+<text  x="30.65" y="175.5" ></text>
+</g>
+<g >
+<title>arch_cpu_idle (217 samples, 46.37%)</title><rect x="133.5" y="309" width="547.2" height="15.0" fill="rgb(234,25,27)" rx="2" ry="2" />
+<text  x="136.55" y="319.5" >arch_cpu_idle</text>
+</g>
+<g >
+<title>__mark_inode_dirty (2 samples, 0.43%)</title><rect x="108.3" y="197" width="5.1" height="15.0" fill="rgb(241,67,14)" rx="2" ry="2" />
+<text  x="111.33" y="207.5" ></text>
+</g>
+<g >
+<title>pagecache_get_page (6 samples, 1.28%)</title><rect x="88.2" y="197" width="15.1" height="15.0" fill="rgb(213,132,11)" rx="2" ry="2" />
+<text  x="91.16" y="207.5" ></text>
+</g>
+<g >
+<title>page_cache_async_readahead (13 samples, 2.78%)</title><rect x="25.1" y="261" width="32.8" height="15.0" fill="rgb(240,32,42)" rx="2" ry="2" />
+<text  x="28.13" y="271.5" >pa..</text>
+</g>
+<g >
+<title>grab_cache_page_write_begin (6 samples, 1.28%)</title><rect x="88.2" y="213" width="15.1" height="15.0" fill="rgb(222,76,33)" rx="2" ry="2" />
+<text  x="91.16" y="223.5" ></text>
+</g>
+<g >
+<title>mpage_map_and_submit_buffers (2 samples, 0.43%)</title><rect x="120.9" y="181" width="5.1" height="15.0" fill="rgb(209,108,24)" rx="2" ry="2" />
+<text  x="123.94" y="191.5" ></text>
+</g>
+<g >
+<title>__vfs_write (25 samples, 5.34%)</title><rect x="57.9" y="293" width="63.0" height="15.0" fill="rgb(254,94,16)" rx="2" ry="2" />
+<text  x="60.91" y="303.5" >__vfs_..</text>
+</g>
+<g >
+<title>write (25 samples, 5.34%)</title><rect x="57.9" y="357" width="63.0" height="15.0" fill="rgb(233,50,35)" rx="2" ry="2" />
+<text  x="60.91" y="367.5" >write</text>
+</g>
+<g >
+<title>__writeback_single_inode (5 samples, 1.07%)</title><rect x="120.9" y="229" width="12.6" height="15.0" fill="rgb(213,197,29)" rx="2" ry="2" />
+<text  x="123.94" y="239.5" ></text>
+</g>
+</g>
+</svg>
