@@ -23,6 +23,8 @@ A few years ago, when I was a second year, I decided to get serious about securi
 
 I started marking my way through them, starting with Practical Malware Analysis, until University started demanding literally every minute of life dedicated to study in order to keep my grades up.
 
+<!--more-->
+
 So, I put my books away for a few years.
 
 My passion for security never stopped though. I kept going to Kiwicon, New Zealands Hacker conference.
