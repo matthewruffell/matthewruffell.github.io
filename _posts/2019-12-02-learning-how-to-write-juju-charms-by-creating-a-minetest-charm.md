@@ -124,7 +124,7 @@ $ juju deploy minetest-server
 $ juju expose minetest-server
 ```
 
-# Edit the revision File
+## Edit the revision File
 
 The revision file keeps track of the Charm version. We are going to keep this
 simple, by saying that this is the first version:
@@ -362,7 +362,7 @@ The `set -e` command tells Juju that if any command returns a non zero exit code
 indicating failure, the script will stop and raise an error, which Juju will
 then communicate to its operator.
 
-We use "systemctl restart" over "systemctl start" due to wanting our hooks to be
+We use `systemctl restart` over `systemctl start` due to wanting our hooks to be
 "idempotent", which means the operation can be repeated many times without
 changing the intended result. If we try and start an already running service,
 we might error out and cause problems. Restart will down the service and get it
