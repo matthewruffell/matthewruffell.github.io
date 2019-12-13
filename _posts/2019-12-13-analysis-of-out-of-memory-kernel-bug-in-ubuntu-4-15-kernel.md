@@ -218,7 +218,7 @@ releases.
 If we look at the git tree located at:
 
 ```
-git://kernel.ubuntu.com/ubuntu/ubuntu-xenial.git
+git://kernel.ubuntu.com/ubuntu/ubuntu-bionic.git
 ```
 
 There are four tags we are interested in:
