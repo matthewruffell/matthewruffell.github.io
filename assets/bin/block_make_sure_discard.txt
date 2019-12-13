@@ -1,0 +1,78 @@
+commit b515257f186e532e0668f7deabcb04b5d27505cf
+Author: Ming Lei <ming.lei@redhat.com>
+Date:   Mon Oct 29 20:57:17 2018 +0800
+
+    block: make sure discard bio is aligned with logical block size
+    
+    BugLink: https://bugs.launchpad.net/bugs/1836802
+    
+    commit 1adfc5e4136f5967d591c399aff95b3b035f16b7 upstream.
+    
+    Obviously the created discard bio has to be aligned with logical block size.
+    
+    This patch introduces the helper of bio_allowed_max_sectors() for
+    this purpose.
+    
+    Cc: stable@vger.kernel.org
+    Cc: Mike Snitzer <snitzer@redhat.com>
+    Cc: Christoph Hellwig <hch@lst.de>
+    Cc: Xiao Ni <xni@redhat.com>
+    Cc: Mariusz Dabrowski <mariusz.dabrowski@intel.com>
+    Fixes: 744889b7cbb56a6 ("block: don't deal with discard limit in blkdev_issue_discard()")
+    Fixes: a22c4d7e34402cc ("block: re-add discard_granularity and alignment checks")
+    Reported-by: Rui Salvaterra <rsalvaterra@gmail.com>
+    Tested-by: Rui Salvaterra <rsalvaterra@gmail.com>
+    Signed-off-by: Ming Lei <ming.lei@redhat.com>
+    Signed-off-by: Jens Axboe <axboe@kernel.dk>
+    Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+    Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+    Signed-off-by: Khalid Elmously <khalid.elmously@canonical.com>
+
+diff --git a/block/blk-lib.c b/block/blk-lib.c
+index 874df58f7cb5..b80e01d0c960 100644
+--- a/block/blk-lib.c
++++ b/block/blk-lib.c
+@@ -53,6 +53,8 @@ int __blkdev_issue_discard(struct block_device *bdev, sector_t sector,
+ 		unsigned int req_sects = nr_sects;
+ 		sector_t end_sect;
+ 
++		req_sects = min(req_sects, bio_allowed_max_sectors(q));
++
+ 		end_sect = sector + req_sects;
+ 
+ 		bio = next_bio(bio, 0, gfp_mask);
+diff --git a/block/blk-merge.c b/block/blk-merge.c
+index 8d60a5bbcef9..f452ccc61060 100644
+--- a/block/blk-merge.c
++++ b/block/blk-merge.c
+@@ -27,7 +27,8 @@ static struct bio *blk_bio_discard_split(struct request_queue *q,
+ 	/* Zero-sector (unknown) and one-sector granularities are the same.  */
+ 	granularity = max(q->limits.discard_granularity >> 9, 1U);
+ 
+-	max_discard_sectors = min(q->limits.max_discard_sectors, UINT_MAX >> 9);
++	max_discard_sectors = min(q->limits.max_discard_sectors,
++			bio_allowed_max_sectors(q));
+ 	max_discard_sectors -= max_discard_sectors % granularity;
+ 
+ 	if (unlikely(!max_discard_sectors)) {
+diff --git a/block/blk.h b/block/blk.h
+index 442098aa9463..e8d598e4a948 100644
+--- a/block/blk.h
++++ b/block/blk.h
+@@ -245,6 +245,16 @@ static inline void req_set_nomerge(struct request_queue *q, struct request *req)
+ 		q->last_merge = NULL;
+ }
+ 
++/*
++ * The max size one bio can handle is UINT_MAX becasue bvec_iter.bi_size
++ * is defined as 'unsigned int', meantime it has to aligned to with logical
++ * block size which is the minimum accepted unit by hardware.
++ */
++static inline unsigned int bio_allowed_max_sectors(struct request_queue *q)
++{
++	return round_down(UINT_MAX, queue_logical_block_size(q)) >> 9;
++}
++
+ /*
+  * Internal io_context interface
+  */
