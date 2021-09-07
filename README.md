@@ -26,7 +26,7 @@ source ~/.bashrc
 Install Jekyll:
 
 ```
-gem install jekyll bundler
+gem install jekyll bundler:2.1.4
 ```
 
 Pull down website gem dependences:
