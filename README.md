@@ -11,7 +11,7 @@ To install / test:
 Install the Jekyll ruby packages:
 
 ```
-sudo apt-get install ruby-full build-essential zlib1g-dev
+sudo apt install ruby-full build-essential zlib1g-dev
 ```
 
 Set ruby gems to be installed in a hidden directory :
@@ -26,7 +26,7 @@ source ~/.bashrc
 Install Jekyll:
 
 ```
-gem install jekyll bundler:2.1.4
+gem install jekyll bundler
 ```
 
 Pull down website gem dependences:
